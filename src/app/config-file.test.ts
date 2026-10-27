@@ -127,3 +127,101 @@ describe("проверка файла импорта", () => {
     expect(errorsOf(result)).toHaveLength(2);
   });
 });
+
+describe("интервал разрешения в файле", () => {
+  const temporary = {
+    ...seedConfig,
+    permissions: [
+      ...seedConfig.permissions,
+      {
+        id: "p6",
+        subject: { type: "user" as const, id: "vera" },
+        serviceId: "mail",
+        startsAt: "2026-03-02T09:00",
+        expiresAt: "2026-03-16T18:00",
+      },
+    ],
+  };
+
+  it("сохраняет интервал при экспорте и обратном импорте", () => {
+    expect(parseConfigFile(exportConfig(temporary))).toEqual({ ok: true, config: temporary });
+  });
+
+  it("не пишет поля интервала у постоянных разрешений", () => {
+    const file = JSON.parse(exportConfig(seedConfig));
+
+    for (const permission of file.permissions) {
+      expect(permission).not.toHaveProperty("startsAt");
+      expect(permission).not.toHaveProperty("expiresAt");
+    }
+  });
+
+  it("принимает разрешение с одним полем интервала", () => {
+    const result = parseWith((file) => (file.permissions[0].expiresAt = "2026-03-16T18:00"));
+
+    expect(result.ok && result.config.permissions[0]).toEqual({
+      ...seedConfig.permissions[0],
+      expiresAt: "2026-03-16T18:00",
+    });
+  });
+
+  it("отвергает время неверного вида", () => {
+    expect(errorsOf(parseWith((file) => (file.permissions[0].expiresAt = "16.03.2026")))).toEqual([
+      "permissions[0]: поле expiresAt должно иметь вид ГГГГ-ММ-ДДTчч:мм",
+    ]);
+    expect(errorsOf(parseWith((file) => (file.permissions[1].startsAt = null)))).toEqual([
+      "permissions[1]: поле startsAt должно иметь вид ГГГГ-ММ-ДДTчч:мм",
+    ]);
+  });
+
+  it("отвергает окончание не позже начала", () => {
+    const result = parseWith((file) => {
+      file.permissions[0].startsAt = "2026-03-16T18:00";
+      file.permissions[0].expiresAt = "2026-03-16T18:00";
+    });
+
+    expect(errorsOf(result)).toEqual(["permissions[0]: окончание срока должно быть позже начала"]);
+  });
+});
+
+describe("момент отзыва в файле", () => {
+  const revoked = {
+    ...seedConfig,
+    permissions: [
+      ...seedConfig.permissions,
+      {
+        id: "p6",
+        subject: { type: "user" as const, id: "vera" },
+        serviceId: "mail",
+        startsAt: "2026-03-02T09:00",
+        expiresAt: "2026-03-16T18:00",
+        revokedAt: "2026-03-09T00:00",
+      },
+    ],
+  };
+
+  it("сохраняет отзыв при экспорте и обратном импорте", () => {
+    expect(parseConfigFile(exportConfig(revoked))).toEqual({ ok: true, config: revoked });
+  });
+
+  it("не пишет revokedAt, если отзывов нет", () => {
+    expect(exportConfig(seedConfig)).not.toContain("revokedAt");
+  });
+
+  it("отвергает отзыв у постоянного разрешения", () => {
+    expect(
+      errorsOf(parseWith((file) => (file.permissions[0].revokedAt = "2026-03-09T00:00"))),
+    ).toEqual(["permissions[0]: отзыв возможен только у временного разрешения"]);
+  });
+
+  it("отвергает момент отзыва неверного вида", () => {
+    const result = parseWith((file) => {
+      file.permissions[0].expiresAt = "2026-03-16T18:00";
+      file.permissions[0].revokedAt = "завтра";
+    });
+
+    expect(errorsOf(result)).toEqual([
+      "permissions[0]: поле revokedAt должно иметь вид ГГГГ-ММ-ДДTчч:мм",
+    ]);
+  });
+});

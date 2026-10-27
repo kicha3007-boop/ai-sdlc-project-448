@@ -4,3 +4,8 @@ npm-cache
 tmp
 dist
 coverage
+
+# Скиллы и команды агента живут в репозитории (глобальный gitignore может их исключать)
+!.claude/
+.claude/settings.local.json
+!CLAUDE.md

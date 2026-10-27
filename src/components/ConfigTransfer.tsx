@@ -1,23 +1,45 @@
 import { Alert, Button, Group, List, Paper, Stack, Text, Title } from "@mantine/core";
 import { useState } from "react";
-import type { ImportResult } from "../app";
+import type { Config, ImportChoice, ImportPreview as Preview, ImportResult } from "../app";
+import { ImportPreview } from "./ImportPreview";
 
 type Props = {
+  config: Config;
   exportJson: () => string;
-  onImport: (text: string) => ImportResult;
+  onChooseFile: (text: string) => ImportChoice;
+  preview: Preview | null;
+  onConfirm: () => ImportResult | null;
+  onCancel: () => void;
 };
 
-export const ConfigTransfer = ({ exportJson, onImport }: Props) => {
+export const ConfigTransfer = ({
+  config,
+  exportJson,
+  onChooseFile,
+  preview,
+  onConfirm,
+  onCancel,
+}: Props) => {
   const [errors, setErrors] = useState<string[]>([]);
-  const [imported, setImported] = useState(false);
+  const [kept, setKept] = useState<string[] | null>(null);
 
   const handleFile = async (file: File | undefined) => {
     if (!file) {
       return;
     }
-    const result = onImport(await file.text());
-    setImported(result.ok);
+    const result = onChooseFile(await file.text());
+    setKept(null);
     setErrors(result.ok ? [] : result.errors);
+  };
+
+  const confirm = () => {
+    const result = onConfirm();
+    setKept(result ? result.keptRevocations : null);
+  };
+
+  const cancel = () => {
+    onCancel();
+    setKept(null);
   };
 
   return (
@@ -47,7 +69,15 @@ export const ConfigTransfer = ({ exportJson, onImport }: Props) => {
             }}
           />
         </Group>
-        {imported && <Text data-testid="import-status">Конфигурация заменена</Text>}
+        {preview && (
+          <ImportPreview config={config} preview={preview} onConfirm={confirm} onCancel={cancel} />
+        )}
+        {!preview && kept !== null && (
+          <Text data-testid="import-status">
+            Конфигурация заменена
+            {kept.length > 0 && `. Сохранён отзыв: ${kept.join(", ")}`}
+          </Text>
+        )}
         {errors.length > 0 && (
           <Alert
             color="red"

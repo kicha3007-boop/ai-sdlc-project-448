@@ -87,6 +87,7 @@ describe("импорт конфигурации", () => {
   it("заменяет конфигурацию целиком и сохраняет её в браузере", async () => {
     renderApp();
     await upload(exportConfig(imported));
+    await userEvent.setup().click(await screen.findByTestId("import-confirm"));
     await screen.findByTestId("import-status");
 
     const items = screen.getAllByTestId(/^permission-item-/);
@@ -114,6 +115,7 @@ describe("импорт конфигурации", () => {
     await screen.findByTestId("import-error");
     await upload(exportConfig(imported));
 
+    await userEvent.setup().click(await screen.findByTestId("import-confirm"));
     await screen.findByTestId("import-status");
     expect(screen.queryByTestId("import-error")).not.toBeInTheDocument();
   });

@@ -1,4 +1,6 @@
 import type { Config, Group, Permission, Service, User } from "../domain/model";
+import { isLocalDateTime } from "../domain/time";
+import type { LocalDateTime } from "../domain/time";
 
 // Формат файла конфигурации (JSON, одинаковый для экспорта, импорта и хранения в браузере):
 //   {
@@ -6,7 +8,9 @@ import type { Config, Group, Permission, Service, User } from "../domain/model";
 //     "users": [{ "id", "name", "groupIds": [groupId] }],
 //     "groups": [{ "id", "name" }],
 //     "services": [{ "id", "name" }],
-//     "permissions": [{ "id", "subject": { "type": "user" | "group", "id" }, "serviceId" }]
+//     "permissions": [{ "id", "subject": { "type": "user" | "group", "id" }, "serviceId",
+//                       "startsAt"?, "expiresAt"?, "revokedAt"? }]   время ГГГГ-ММ-ДДTчч:мм без пояса;
+//                       revokedAt только у разрешения с интервалом
 //   }
 // Идентификаторы внутри списка уникальны. Разрешения и участие в группах ссылаются на
 // существующие записи, иначе файл отвергается целиком. Неизвестные поля игнорируются: новые
@@ -86,6 +90,23 @@ const readUser = (item: Json, where: string, errors: string[]): User => {
   };
 };
 
+const readTime = (
+  item: Json,
+  field: "startsAt" | "expiresAt" | "revokedAt",
+  where: string,
+  errors: string[],
+): LocalDateTime | undefined => {
+  const value = item[field];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isLocalDateTime(value)) {
+    errors.push(`${where}: поле ${field} должно иметь вид ГГГГ-ММ-ДДTчч:мм`);
+    return undefined;
+  }
+  return value;
+};
+
 const readPermission = (item: Json, where: string, errors: string[]): Permission | null => {
   const { subject } = item;
   if (!isObject(subject)) {
@@ -96,11 +117,31 @@ const readPermission = (item: Json, where: string, errors: string[]): Permission
     errors.push(`${where}: тип субъекта должен быть user или group`);
     return null;
   }
-  return {
+  const startsAt = readTime(item, "startsAt", where, errors);
+  const expiresAt = readTime(item, "expiresAt", where, errors);
+  if (startsAt !== undefined && expiresAt !== undefined && expiresAt <= startsAt) {
+    errors.push(`${where}: окончание срока должно быть позже начала`);
+  }
+  const revokedAt = readTime(item, "revokedAt", where, errors);
+  if (revokedAt !== undefined && startsAt === undefined && expiresAt === undefined) {
+    errors.push(`${where}: отзыв возможен только у временного разрешения`);
+  }
+  const permission: Permission = {
     id: readText(item, "id", where, errors),
     subject: { type: subject.type, id: readText(subject, "id", `${where}.subject`, errors) },
     serviceId: readText(item, "serviceId", where, errors),
   };
+  // Поля времени пишутся только со значением, чтобы файл постоянного разрешения не менялся.
+  if (startsAt !== undefined) {
+    permission.startsAt = startsAt;
+  }
+  if (expiresAt !== undefined) {
+    permission.expiresAt = expiresAt;
+  }
+  if (revokedAt !== undefined) {
+    permission.revokedAt = revokedAt;
+  }
+  return permission;
 };
 
 const checkReferences = (config: Config, source: Json, errors: string[]): void => {

@@ -1,34 +1,47 @@
-import { Button, Group, NativeSelect, Paper, Stack, Text, Title } from "@mantine/core";
+import { Button, Group, NativeSelect, Paper, Stack, Text, TextInput, Title } from "@mantine/core";
 import { useState } from "react";
-import type { Config, GrantResult, Permission, Subject } from "../app";
+import { canRevoke } from "../app";
+import { describePermission } from "./describe";
+import type { Config, GrantResult, Interval, RevokeOutcome, Subject } from "../app";
 
 type Props = {
   config: Config;
-  onGrant: (subject: Subject, serviceId: string) => GrantResult;
-  onRevoke: (permissionId: string) => void;
+  onGrant: (subject: Subject, serviceId: string, interval: Interval) => GrantResult;
+  onRemove: (permissionId: string) => void;
+  /** Пустой at значит «на текущий момент расчёта», подстановку делает вызывающий. */
+  onRevoke: (permissionId: string, at: string) => RevokeOutcome;
 };
 
-const subjectName = (subject: Subject, config: Config): string => {
-  if (subject.type === "user") {
-    return config.users.find(({ id }) => id === subject.id)?.name ?? subject.id;
-  }
-  const name = config.groups.find(({ id }) => id === subject.id)?.name ?? subject.id;
-  return `Группа «${name}»`;
+const MESSAGES: Record<GrantResult, string> = {
+  granted: "Разрешение выдано",
+  exists: "Это разрешение уже выдано",
+  "invalid-time": "Время должно иметь вид ГГГГ-ММ-ДДTчч:мм",
+  "invalid-interval": "Окончание срока должно быть позже начала",
 };
 
-const describePermission = (permission: Permission, config: Config): string => {
-  const service = config.services.find(({ id }) => id === permission.serviceId);
-  return `${subjectName(permission.subject, config)}: ${service?.name ?? permission.serviceId}`;
+const REVOKE_MESSAGES: Record<RevokeOutcome, string> = {
+  revoked: "Разрешение отозвано",
+  "already-revoked": "Разрешение уже отозвано",
+  "not-temporary": "Постоянное разрешение не отзывается, его можно удалить",
+  missing: "Разрешение не найдено",
 };
+
+const toInterval = (startsAt: string, expiresAt: string): Interval => ({
+  ...(startsAt && { startsAt }),
+  ...(expiresAt && { expiresAt }),
+});
 
 const toSubject = (value: string): Subject | null => {
   const [type, id] = value.split(":");
   return (type === "user" || type === "group") && id ? { type, id } : null;
 };
 
-export const PermissionsPanel = ({ config, onGrant, onRevoke }: Props) => {
+export const PermissionsPanel = ({ config, onGrant, onRemove, onRevoke }: Props) => {
   const [subjectValue, setSubjectValue] = useState("");
   const [serviceId, setServiceId] = useState("");
+  const [startsAt, setStartsAt] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
+  const [revokedAt, setRevokedAt] = useState("");
   const [message, setMessage] = useState("");
 
   const subject = toSubject(subjectValue);
@@ -37,9 +50,7 @@ export const PermissionsPanel = ({ config, onGrant, onRevoke }: Props) => {
     if (!subject || !serviceId) {
       return;
     }
-    setMessage(
-      onGrant(subject, serviceId) === "exists" ? "Это разрешение уже выдано" : "Разрешение выдано",
-    );
+    setMessage(MESSAGES[onGrant(subject, serviceId, toInterval(startsAt, expiresAt))]);
   };
 
   return (
@@ -55,14 +66,26 @@ export const PermissionsPanel = ({ config, onGrant, onRevoke }: Props) => {
             data-testid={`permission-item-${permission.id}`}
           >
             <Text>{describePermission(permission, config)}</Text>
-            <Button
-              variant="default"
-              size="xs"
-              data-testid={`permission-remove-${permission.id}`}
-              onClick={() => onRevoke(permission.id)}
-            >
-              Отозвать
-            </Button>
+            <Group gap="xs">
+              {canRevoke(permission) && (
+                <Button
+                  variant="default"
+                  size="xs"
+                  data-testid={`permission-revoke-${permission.id}`}
+                  onClick={() => setMessage(REVOKE_MESSAGES[onRevoke(permission.id, revokedAt)])}
+                >
+                  Отозвать досрочно
+                </Button>
+              )}
+              <Button
+                variant="default"
+                size="xs"
+                data-testid={`permission-remove-${permission.id}`}
+                onClick={() => onRemove(permission.id)}
+              >
+                Удалить
+              </Button>
+            </Group>
           </Group>
         ))}
         <Group align="flex-end">
@@ -90,10 +113,32 @@ export const PermissionsPanel = ({ config, onGrant, onRevoke }: Props) => {
               ...config.services.map((service) => ({ value: service.id, label: service.name })),
             ]}
           />
+          <TextInput
+            type="datetime-local"
+            label="Действует с"
+            data-testid="permission-starts-at"
+            value={startsAt}
+            onChange={(event) => setStartsAt(event.currentTarget.value)}
+          />
+          <TextInput
+            type="datetime-local"
+            label="Действует до (не включая)"
+            data-testid="permission-expires-at"
+            value={expiresAt}
+            onChange={(event) => setExpiresAt(event.currentTarget.value)}
+          />
           <Button data-testid="permission-add" disabled={!subject || !serviceId} onClick={grant}>
             Выдать
           </Button>
         </Group>
+        <TextInput
+          type="datetime-local"
+          label="Момент отзыва"
+          description="Пусто — на текущий момент расчёта. Доступ закрывается с этого момента включительно"
+          data-testid="permission-revoked-at"
+          value={revokedAt}
+          onChange={(event) => setRevokedAt(event.currentTarget.value)}
+        />
         {message && <Text data-testid="permission-message">{message}</Text>}
       </Stack>
     </Paper>
